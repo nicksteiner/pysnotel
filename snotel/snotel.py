@@ -22,31 +22,26 @@ from contextlib import contextmanager
 import pytz
 import numpy as np
 import pandas as pd
-import psycopg2 as sql
+import sqlite3 as sql
+
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import MetaData, engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import and_, or_, types, Column, create_engine, distinct, desc, asc
 
-from elementrecord import elementcd_toload, duration_toload
-
-
+from .elementrecord import elementcd_toload, duration_toload
+import pathlib
+from suds.client import Client
 
 '''
 Database Engines
 ~~~~~~~~~~~~~~~~
 '''
-_PATH = os.path.dirname(os.path.realpath(__file__))
+_PATH = pathlib.Path(__file__).parent
 
-if socket.gethostname() == 'kyle-new':
+_SQL_PATH = _PATH / 'snotel.sqlite'
 
-    engine_str = 'postgresql+psycopg2://nsteiner:cherry@localhost:5433/snotel'
-
-elif socket.gethostname() == 'blue':
-    engine_str = 'postgresql+psycopg2://nsteiner:cherry@localhost:5433/snotel_alch'
-else:
-    engine_str = 'postgresql+psycopg2://happy.ccny.cuny.edu:5433/snotel'
-
+engine_str = 'sqlite:///{}'.format(_SQL_PATH.absolute())
 
 ee = engine.create_engine(engine_str)
 
@@ -54,8 +49,8 @@ metadata = MetaData(bind=ee)
 Session = sessionmaker(bind=ee)
 Base = declarative_base(metadata=metadata)
 
-
-collection_engine = create_engine('sqlite:///{}'.format(os.path.join(_PATH, 'collection.sqlite')))
+# in process of refactoring
+collection_engine = ee # reate_engine('sqlite:///{}'.format(os.path.join(_PATH, 'collection.sqlite')))
 
 
 @contextmanager
@@ -72,16 +67,6 @@ def session_scope():
         session.close()
 
 
-AUTH = {'host': 'localhost',
-        'port': 5433,
-        'user': 'nsteiner',
-        'password': 'cherry',
-        'database': 'snotel_alch'}
-
-
-def get_connection(auth=AUTH):
-    return sql.connect(**AUTH)
-
 # LOGGING
 # =======
 logging.basicConfig(level=logging.INFO,
@@ -94,13 +79,19 @@ VERBOSE = True
 
 # SOAP Client Configuration
 # =========================
-from suds.client import Client
+# paste this at the start of code
+import ssl
 
-URL = 'http://www.wcc.nrcs.usda.gov/awdbWebService/services?WSDL'
 try:
-    client = Client(URL)
-except:
-    logging.error('Cannot connect to client')
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+else:
+    ssl._create_default_https_context = _create_unverified_https_context
+
+URL = 'http://www.wcc.nrcs.usda.gov/awdbWebService/services?wsdl'
+
+client = Client(URL)
 
 
 '''
@@ -166,7 +157,7 @@ def grouper(iterable, n, fill_value=None):
     :return: list of groups of size at max n-length
     """
     arguments = [iter(iterable)] * n
-    groups = it.izip_longest(*arguments, fillvalue=fill_value)
+    groups = it.zip_longest(*arguments, fillvalue=fill_value)
     return [[val for val in group if val] for group in groups]
 
 '''
@@ -198,7 +189,7 @@ def parse_station_meta(meta):
     :param meta: Station metadata from NWCC webservice
     :return: Python dictionary formatted for Station obj.
     """
-    return dict((CamelCase(key), value) for key, value in dict(meta).iteritems())
+    return dict((CamelCase(key), value) for key, value in dict(meta).items())
 
 def get_station_list_byelement(element_str, fips_number='02'):
     with session_scope() as session:
@@ -208,7 +199,7 @@ def get_station_list_byelement(element_str, fips_number='02'):
           e."ElementTriplet" like '%STO%' and
           s."FipsStateNumber" like '02';
 
-        '''
+        ''' # ^ example
         results = session.query(Station, Element). \
             filter(and_(Element.StationTriplet == Station.StationTriplet,
                         Station.FipsStateNumber == fips_number,
@@ -429,7 +420,7 @@ def cast_element_request(element, local=True):
                     request[key] = datetime.datetime.strptime(element.BeginDate, '%Y-%m-%d %H:%M:%S').date().isoformat()
                 else:
                     request[key] = element.BeginDate.date().isoformat()
-    for key, fun in data_request_fmt.iteritems():
+    for key, fun in data_request_fmt.items():
         request[key] = fun(getattr(element, CamelCase(key), None))
     return request
 
@@ -441,7 +432,7 @@ def parse_element_meta(element_meta):
         meta_dict['HeightDepth'] = height_depth.value
     except:
         meta_dict['HeightDepth'] = None
-    meta = dict([(CamelCase(key), value) for key, value in meta_dict.iteritems()])
+    meta = dict([(CamelCase(key), value) for key, value in meta_dict.items()])
     meta['ElementTriplet'] = '{StationTriplet}:{ElementCd}:{Duration}:{HeightDepth}'.format(**meta)
     meta['BeginDate'] = datetime.datetime.strptime(meta['BeginDate'], '%Y-%m-%d %H:%M:%S')
     meta['EndDate'] = datetime.datetime.strptime(meta['EndDate'], '%Y-%m-%d %H:%M:%S')

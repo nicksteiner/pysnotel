@@ -1,12 +1,10 @@
 __author__ = 'nsteiner'
 
-import ipdb
-from snotel2 import *
-from matplotlib.pylab import *
+from snotel import *
 import copy
 
 attributes = ['Name', 'StationTriplet', 'CountyName', 'Latitude',
-        'Longitude', 'Elevation', 'StationDataTimeZone']
+              'Longitude', 'Elevation', 'StationDataTimeZone']
 
 _PATH = os.path.dirname(os.path.realpath(__file__))
 START = datetime.datetime(2007, 1, 1)

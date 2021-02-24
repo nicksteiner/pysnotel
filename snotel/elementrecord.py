@@ -123,5 +123,5 @@ ELEMENTS = {
         'WSPDN': ('WIND SPEED MINIMUM', 'mph', False),
         'WSPD':  ('WIND SPEED OBSERVED', 'mph', False),
         }
-elementcd_toload = [name for name, (_,_,load) in ELEMENTS.iteritems() if load]
+elementcd_toload = [name for name, (_,_,load) in ELEMENTS.items() if load]
 duration_toload = ['HOURLY']
