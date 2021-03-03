@@ -91,7 +91,7 @@ else:
 
 URL = 'http://www.wcc.nrcs.usda.gov/awdbWebService/services?wsdl'
 
-client = Client(URL)
+client = Client(URL, timeout=900)
 
 
 '''
@@ -183,13 +183,8 @@ def find_stationtriplet_byid(id_number, state_abbr):
         session.expunge_all()
     return station_triplet_list
 
-def parse_station_meta(meta):
-    """
 
-    :param meta: Station metadata from NWCC webservice
-    :return: Python dictionary formatted for Station obj.
-    """
-    return dict((CamelCase(key), value) for key, value in dict(meta).items())
+
 
 def get_station_list_byelement(element_str, fips_number='02'):
     with session_scope() as session:
@@ -252,9 +247,6 @@ def get_station_meta(station_triplet=None, station_list=None):
     if station_list:
         return client.service.getStationMetadataMultiple(station_list)
 
-def construct_station(station_meta):
-    meta_dict = parse_station_meta(station_meta)
-    return Station(**meta_dict)
 
 def add_station(station):
     with session_scope() as session:
@@ -390,7 +382,6 @@ def get_element_bystationtriplet(station_triplet, local=True, filters=('duration
             session.expunge_all()
     else:
         station_element_meta_list = client.service.getStationElements(station_triplet)
-
         station_elements = [construct_element(element_meta) for element_meta in station_element_meta_list]
     if filters:
         station_elements = filter_elements(station_elements, filters)
@@ -407,19 +398,14 @@ def cast_element_request(element, local=True):
     data_request_fmt = copy.deepcopy(DATA_REQUEST_FMT)
     data_request_fmt.pop('stationTriplets')
     request['stationTriplets'] = element.StationTriplet
-
     for key in ['beginDate', 'endDate']:
-        fun = data_request_fmt.pop(key)
         if key == 'endDate':
-                request[key] = datetime.datetime.now().date().isoformat()
+                request[key] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         elif key == 'beginDate':
             if element.LocalEndDate:
-                request[key] = element.LocalEndDate.date().isoformat()
+                request[key] = element.LocalEndDate.strftime('%Y-%m-%d %H:%M:%S')
             else:
-                if not local:
-                    request[key] = datetime.datetime.strptime(element.BeginDate, '%Y-%m-%d %H:%M:%S').date().isoformat()
-                else:
-                    request[key] = element.BeginDate.date().isoformat()
+                request[key] = element.BeginDate.strftime('%Y-%m-%d %H:%M:%S')
     for key, fun in data_request_fmt.items():
         request[key] = fun(getattr(element, CamelCase(key), None))
     return request
@@ -461,17 +447,10 @@ def add_element(element):
         print('Error merging element: {}'.format(element))
 
 def add_elements(element_meta_list):
-    for element_meta in element_meta_list:
-        info = (element_meta.StationTriplet, element_meta.ElementCd)
-        try:
-            element = construct_element(element_meta)
-        except Exception as e:
-            print(e)
-            print('Error constructing meta: {},{}'.format(*info))
-            add_element()
-            continue
-
+    for element in element_meta_list:
+        info = (element.StationTriplet, element.ElementCd)
         add_element(element)
+
 
 def add_element_inpool(element):
     print('Attempting update element {} ...'.format(element))
@@ -603,6 +582,8 @@ def add_data(data_list):
     '''
 
 def get_data_hourly(request):
+    request['beginDate'] = request['beginDate'] + ' 00:00:00'
+    request['endDate'] = request['endDate'] + ' 00:00:00'
     return client.service.getHourlyData(**request)
 
 def get_data_byelement(element_triplet):
@@ -637,6 +618,26 @@ def update_data(element, data_result):
 OO Objects
 ~~~~~~~~~~
 '''
+
+def parse_station_meta(meta):
+    """
+
+    :param meta: Station metadata from NWCC webservice
+    :return: Python dictionary formatted for Station obj.
+    """
+    return dict((CamelCase(key), value) for key, value in dict(meta).items())
+
+_dt_parser = lambda x: datetime.datetime.strptime(x, '%Y-%m-%d %M:%H:%S')
+_Station_lookup = {'BeginDate': _dt_parser, 'CountyName': str, 'Elevation': int, 'EndDate': _dt_parser,
+                   'FipsCountryCd': str, 'FipsCountyCd': str, 'FipsStateNumber': str, 'Huc': int,
+                   'Hud': int, 'Latitude': float, 'Longitude': float, 'Name': str,
+                   'StationDataTimeZone': float, 'StationTriplet': str}
+def construct_station(station_meta):
+    meta_dict = parse_station_meta(station_meta)
+    meta_dict = {k: fun(meta_dict[k]) for k, fun in _Station_lookup.items()}
+    return Station(**meta_dict)
+
+
 class Station(Base):
     '''    
     Snotel/SCAN automated weather station data abstraction.
@@ -667,6 +668,7 @@ class Station(Base):
                 setattr(self, key, arg[key])
         for key in kwargs:
             setattr(self, key, kwargs[key])
+
         self.freq = freq
         self.how = how
         self.filter = filter
