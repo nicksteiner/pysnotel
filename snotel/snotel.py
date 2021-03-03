@@ -632,9 +632,12 @@ _Station_lookup = {'BeginDate': _dt_parser, 'CountyName': str, 'Elevation': int,
                    'FipsCountryCd': str, 'FipsCountyCd': str, 'FipsStateNumber': str, 'Huc': int,
                    'Hud': int, 'Latitude': float, 'Longitude': float, 'Name': str,
                    'StationDataTimeZone': float, 'StationTriplet': str}
+
 def construct_station(station_meta):
     meta_dict = parse_station_meta(station_meta)
-    meta_dict = {k: fun(meta_dict[k]) for k, fun in _Station_lookup.items()}
+    for k, fun in _Station_lookup.items():
+        if k in meta_dict:
+            meta_dict[k] = fun(meta_dict[k])
     return Station(**meta_dict)
 
 

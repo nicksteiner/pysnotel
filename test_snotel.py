@@ -1,11 +1,11 @@
 import sys
 from snotel import snotel
 import pytest
-
+sys.path.append('')
 sys.stdout.flush()
 
 
-TEST_STATION_TRIPLET = '968:AK:SNTL'
+TEST_STATION_TRIPLET = '2213:AK:SCAN'
 
 def test_init_database():
     print('Database init if not there.')
