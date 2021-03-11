@@ -131,7 +131,7 @@ DATA_REQUEST_FMT = {
     'stationTriplets': str,
     'elementCd': str,
     'ordinal': str,
-    'heightDepth': lambda x: {'value': int(x), 'unitCd': 'in'},
+    'heightDepth': lambda x: {'value': int(x) if x is not None else None, 'unitCd': 'in'},
     'beginDate': DATE_FORMAT_TO,
     'endDate': DATE_FORMAT_TO}
 
@@ -454,26 +454,19 @@ def add_elements(element_meta_list):
 
 def add_element_inpool(element):
     print('Attempting update element {} ...'.format(element))
-
+    etable = metadata.tables['element']
     print('Deleting element {} ...'.format(element))
-    with ee.connect() as conn:
-        #with conn.cursor() as cur:
-        query = 'DELETE from element WHERE "ElementTriplet" like (%s)'
-        conn.execute(query, (element.ElementTriplet,))
-        conn.commit()
+    with ee.begin() as conn:
+        conn.execute(etable.delete().where(etable.c.ElementTriplet == element.ElementTriplet))
     print('Reading element {} ...'.format(element))
-    with ee.connect() as conn:
-        #with conn.cursor() as cur:
-        query = ('INSERT into element values '
-                 '(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)')
-        tup = (element.BeginDate, element.DataPrecision,
-               element.DataSource, element.Duration, element.ElementCd,
-               element.EndDate, element.Ordinal, element.OriginalUnitCd,
-               element.StationTriplet, element.StoredUnitCd,
-               element.HeightDepth, element.ElementTriplet, element.LocalBeginDate,
-               element.LocalEndDate)
-        conn.execute(query, tup)
-        conn.commit()
+    with ee.begin() as conn:
+        values_ = (element.BeginDate, element.DataPrecision,
+                   element.DataSource, element.Duration, element.ElementCd,
+                   element.EndDate, element.Ordinal, element.OriginalUnitCd,
+                   element.StationTriplet, element.StoredUnitCd,
+                   element.HeightDepth, element.ElementTriplet, element.LocalBeginDate,
+                   element.LocalEndDate)
+        conn.execute(etable.insert().values(values_))
     print('Updated element {} ...'.format(element))
 
 def update_element_data_list_inpool(element_list):
