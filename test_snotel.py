@@ -23,11 +23,14 @@ def test_update_elements():
 def test_update_element_data():
     print('Testing one element from server...')
     element_list = snotel.get_element_bystationtriplet(TEST_STATION_TRIPLET, local=True, filters=['duration', 'elementcd'])
-    snotel.update_element_data(element_list[0], in_pool=False)
+    #el_ = [el for el in element_list if el.ElementCd == 'TOBS'][0]
+    el_ = [el for el in element_list if el.ElementCd == 'STO'][-1]
+    snotel.update_element_data(el_, in_pool=False)
 
 def test_update_station_element_data_pool():
     print('Testing one element from server...')
-    element_list = snotel.get_station_element(TEST_STATION_TRIPLET, local=True, filters=['duration', 'elementcd'])
+    element_list = snotel.get_element_bystationtriplet(TEST_STATION_TRIPLET, local=True, filters=['duration', 'elementcd'])
+    el_ = [el for el in element_list if el.ElementCd == 'TOBS'][0]
     snotel.update_element_data(element_list[0], in_pool=True)
 
 

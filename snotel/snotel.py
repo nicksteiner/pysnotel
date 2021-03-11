@@ -125,13 +125,13 @@ GRPSIZE = 500
 CamelCase = lambda name: name[0].upper() + name[1:]
 lowerCamel = lambda name: name[0].lower() + name[1:]
 
-DATE_FORMAT_TO = lambda x: datetime.datetime.strftime(x)
+DATE_FORMAT_TO = lambda x: x.strftime('%Y-%m-%d')
 DATE_FORMAT_FROM = lambda x: datetime.datetime.strptime(x, '%Y-%m-%d %H:%M')
 DATA_REQUEST_FMT = {
     'stationTriplets': str,
     'elementCd': str,
     'ordinal': str,
-    'heightDepth': lambda x: {'value': x},
+    'heightDepth': lambda x: {'value': int(x), 'unitCd': 'in'},
     'beginDate': DATE_FORMAT_TO,
     'endDate': DATE_FORMAT_TO}
 
@@ -456,24 +456,24 @@ def add_element_inpool(element):
     print('Attempting update element {} ...'.format(element))
 
     print('Deleting element {} ...'.format(element))
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            query = 'DELETE from element WHERE "ElementTriplet" like (%s)'
-            cur.execute(query, (element.ElementTriplet,))
-            conn.commit()
+    with ee.connect() as conn:
+        #with conn.cursor() as cur:
+        query = 'DELETE from element WHERE "ElementTriplet" like (%s)'
+        conn.execute(query, (element.ElementTriplet,))
+        conn.commit()
     print('Reading element {} ...'.format(element))
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            query = ('INSERT into element values '
-                     '(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)')
-            tup = (element.BeginDate, element.DataPrecision,
-                   element.DataSource, element.Duration, element.ElementCd,
-                   element.EndDate, element.Ordinal, element.OriginalUnitCd,
-                   element.StationTriplet, element.StoredUnitCd,
-                   element.HeightDepth, element.ElementTriplet, element.LocalBeginDate,
-                   element.LocalEndDate)
-            cur.execute(query, tup)
-            conn.commit()
+    with ee.connect() as conn:
+        #with conn.cursor() as cur:
+        query = ('INSERT into element values '
+                 '(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)')
+        tup = (element.BeginDate, element.DataPrecision,
+               element.DataSource, element.Duration, element.ElementCd,
+               element.EndDate, element.Ordinal, element.OriginalUnitCd,
+               element.StationTriplet, element.StoredUnitCd,
+               element.HeightDepth, element.ElementTriplet, element.LocalBeginDate,
+               element.LocalEndDate)
+        conn.execute(query, tup)
+        conn.commit()
     print('Updated element {} ...'.format(element))
 
 def update_element_data_list_inpool(element_list):
@@ -502,8 +502,8 @@ def update_element_data(element, in_pool=False):
     data_result = data_result[0]
     if 'values' in data_result:
         begin_date, end_date = update_data(element, data_result)
-        element.LocalBeginDate = datetime.datetime.strptime(begin_date, '%Y-%m-%d')
-        element.LocalEndDate = datetime.datetime.strptime(end_date, '%Y-%m-%d')
+        element.LocalBeginDate = begin_date
+        element.LocalEndDate = end_date
         print('Updating element table ...')
         #add_element(element)
         if in_pool:
@@ -527,14 +527,14 @@ def delete_data(element_triplet, start_date, end_date):
     :param start_date: start of data to delete
     :param end_date: end of data to delete
     """
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            query = ('DELETE FROM data WHERE '
-                     '"ElementTriplet" like (%s) and '
-                     '"DateTime" >= (%s) and '
-                     '"DateTime" <= (%s)')
-            cur.execute(query, (element_triplet, start_date, end_date))
-            conn.commit()
+    dtable = metadata.tables['data']
+    with ee.begin() as conn:
+        conn.execute(
+            dtable.delete().where(dtable.c.ElementTriplet == element_triplet). \
+                where(dtable.c.DateTime >= start_date). \
+                where(dtable.c.DateTime <= end_date)
+        )
+    return
 
 def parse_data_response_hourly(hourly_data, num_stations=1):
     """
@@ -559,7 +559,7 @@ def parse_data_values(element, data_result):
     data_list = []
     for data_row in data_result.values:
         data_list.append((element.ElementTriplet, element.StationTriplet,
-                          data_row.dateTime, data_row.flag, data_row.value))
+                          DATE_FORMAT_FROM(data_row.dateTime), data_row.flag, data_row.value))
     return list(set(data_list))
 
 def parse_data_objects(data_list):
@@ -568,11 +568,12 @@ def parse_data_objects(data_list):
     return date_time, np.array(value, dtype='double'), np.array(flag, dtype='str')
 
 def add_data(data_list):
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            sql = 'INSERT INTO data VALUES (%s, %s, %s, %s, %s)'
-            cur.executemany(sql, data_list)
-            conn.commit()
+    dtable = metadata.tables['data']
+    with ee.begin() as conn:
+        conn.execute(dtable.insert().values(data_list))        #with conn.cursor() as cur:
+        #sql = 'INSERT INTO data VALUES (%s, %s, %s, %s, %s)'
+        #conn.executemany(sql, data_list)
+        #conn.commit()
 
     '''
         Data Updates
@@ -582,8 +583,8 @@ def add_data(data_list):
     '''
 
 def get_data_hourly(request):
-    request['beginDate'] = request['beginDate'] + ' 00:00:00'
-    request['endDate'] = request['endDate'] + ' 00:00:00'
+    request['beginDate'] = request['beginDate']
+    request['endDate'] = request['endDate']
     return client.service.getHourlyData(**request)
 
 def get_data_byelement(element_triplet):
@@ -607,11 +608,13 @@ def update_data_all():
 def update_data(element, data_result):
     assert element.StationTriplet == data_result.stationTriplet
     print('DELETING from data ...')
-    delete_data(element.ElementTriplet, data_result.beginDate, data_result.endDate)
+    begin_date = DATE_FORMAT_FROM(data_result.beginDate)
+    end_date = DATE_FORMAT_FROM(data_result.endDate)
+    delete_data(element.ElementTriplet, begin_date, end_date)
     data_list = parse_data_values(element, data_result)
     print('ADDING into data {} values ...'.format(len(data_list)))
     add_data(data_list)
-    return data_result.beginDate, data_result.endDate
+    return begin_date, end_date
 
 
 '''
